@@ -178,3 +178,17 @@ async def clear_index():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import List
+
+app = FastAPI()
+
+class QueryRequest(BaseModel):
+    documents: str
+    questions: List[str]
+
+@app.post("/hackrx/run")
+def run_query(request: QueryRequest):
+    return {"answers": ["This is a dummy response for now."]}
