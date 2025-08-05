@@ -1,3 +1,4 @@
+# Services package for HackRx Query System
 """
 Services Package - HackRX Query System
 ======================================
