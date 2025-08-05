@@ -10,7 +10,7 @@ import logging
 from typing import List, Dict, Any
 
 # Add app directory to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), 'app'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -65,7 +65,7 @@ def test_embedder():
     logger.info("Testing Embedding Service...")
     
     try:
-        from services.embedder import create_embedder
+        from app.services.embedder import create_embedder
         
         # Try OpenAI first, fallback to HuggingFace
         embedder = None
@@ -114,7 +114,7 @@ def test_vector_store(embedder):
     logger.info("Testing Vector Store Service...")
     
     try:
-        from services.vector_store import DocumentVectorStore
+        from app.services.vector_store import DocumentVectorStore
         
         # Create test data directory
         test_data_dir = "test_data"
@@ -166,7 +166,7 @@ def test_reranker(embedder, doc_store):
     logger.info("Testing Reranker Service...")
     
     try:
-        from services.reranker import create_reranker
+        from app.services.reranker import create_reranker
         
         # Get initial search results
         query = TEST_QUERIES[0]
@@ -304,8 +304,8 @@ def main():
             
             # Quick setup for performance test
             try:
-                from services.embedder import create_embedder
-                from services.vector_store import DocumentVectorStore
+                from app.services.embedder import create_embedder
+                from app.services.vector_store import DocumentVectorStore
                 
                 embedder = create_embedder("huggingface")  # Use local model for performance test
                 doc_store = DocumentVectorStore(embedder.get_embedding_dimension(), "test_data")

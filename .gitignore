@@ -18,6 +18,21 @@ downloads/
 eggs/
 .eggs/
 lib/
+
+# Testing
+test_data/
+temp_*/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
 lib64/
 parts/
 sdist/
