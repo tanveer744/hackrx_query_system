@@ -78,6 +78,10 @@ SAMPLE_QUERIES = [
     "What is the annual deductible?"
 ]
 
+import numpy as np
+from app.services.embedder import create_embedder
+from app.services.vector_store import create_faiss_index_from_embeddings, semantic_search
+
 
 def demonstrate_retrieval_system():
     """Demonstrate the complete retrieval system."""
@@ -242,4 +246,27 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # 1. Example text chunks
+    texts = [
+        "Knee surgery is covered.",
+        "Cataract has a waiting period.",
+        "Outpatient expenses are reimbursed.",
+    ]
+    
+    # 2. Get embeddings
+    embedder = create_embedder("huggingface")
+    embeddings = embedder.embed_batch(texts)
+    
+    # 3. Create FAISS index
+    doc_store = create_faiss_index_from_embeddings(texts, embeddings, sources=["policy.pdf"]*len(texts))
+    
+    # 4. Prepare a query and get its embedding
+    query = "Is cataract surgery covered?"
+    query_embedding = embedder.embed_single(query)
+    
+    # 5. Perform top-k semantic search
+    results = semantic_search(doc_store, query_embedding, k=2)
+    
+    print("Top-2 semantic search results:")
+    for i, res in enumerate(results):
+        print(f"Result {i+1}: text='{res['text']}', score={res['similarity_score']:.4f}")

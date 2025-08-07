@@ -279,6 +279,37 @@ class DocumentVectorStore:
         return stats
 
 
+def create_faiss_index_from_embeddings(
+    texts: list,
+    embeddings: np.ndarray,
+    sources: list = None,
+    pages: list = None,
+    sections: list = None,
+    data_dir: str = "data"
+) -> DocumentVectorStore:
+    """
+    Utility function to create a FAISS index from embeddings and metadata.
+    Returns a DocumentVectorStore instance.
+    """
+    if sources is None:
+        sources = ["unknown"] * len(texts)
+    doc_store = DocumentVectorStore(embeddings.shape[1], data_dir)
+    doc_store.add_documents(texts, embeddings, sources, pages, sections)
+    return doc_store
+
+
+def semantic_search(
+    doc_store: DocumentVectorStore,
+    query_embedding: np.ndarray,
+    k: int = 5
+) -> list:
+    """
+    Utility function to perform top-k semantic search using a DocumentVectorStore.
+    Returns a list of result dicts.
+    """
+    return doc_store.search_documents(query_embedding, k)
+
+
 # Example usage and testing
 if __name__ == "__main__":
     # Test vector store with sample data
