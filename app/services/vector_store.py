@@ -391,6 +391,55 @@ class FAISSIndex:
         
         return results
 
+    def save(self, index_path: str, metadata_path: str) -> None:
+        """
+        Save the FAISS index and metadata to disk.
+        Args:
+            index_path: Path to save FAISS index
+            metadata_path: Path to save metadata
+        """
+        import os
+        os.makedirs(os.path.dirname(index_path), exist_ok=True)
+        os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
+        self.faiss.write_index(self.index, index_path)
+        import json
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                'texts': self.texts,
+                'metadata': self.metadata
+            }, f, indent=2, ensure_ascii=False)
+
+    def load(self, index_path: str, metadata_path: str) -> None:
+        """
+        Load the FAISS index and metadata from disk.
+        Args:
+            index_path: Path to FAISS index file
+            metadata_path: Path to metadata file
+        """
+        if not os.path.exists(index_path):
+            raise FileNotFoundError(f"Index file not found: {index_path}")
+        if not os.path.exists(metadata_path):
+            raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
+        self.index = self.faiss.read_index(index_path)
+        import json
+        with open(metadata_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            self.texts = data.get('texts', [])
+            self.metadata = data.get('metadata', [])
+
+    def get_top_k_chunks(self, query: str, embedder, k: int = 5) -> list:
+        """
+        Embed the query string and return the top-k most similar chunks.
+        Args:
+            query: The query string
+            embedder: An embedder object with an embed_single(str) -> List[float] method
+            k: Number of top results to return
+        Returns:
+            List of dictionaries with text, metadata, and similarity scores
+        """
+        query_embedding = embedder.embed_single(query)
+        return self.search(query_embedding, k)
+
 
 # Example usage and testing
 if __name__ == "__main__":
