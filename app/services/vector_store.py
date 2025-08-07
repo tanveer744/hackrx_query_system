@@ -310,6 +310,88 @@ def semantic_search(
     return doc_store.search_documents(query_embedding, k)
 
 
+class FAISSIndex:
+    """
+    Simple FAISS index class matching the requested API.
+    Provides add() and search() methods with metadata support.
+    """
+    
+    def __init__(self, dimension: int):
+        """
+        Initialize FAISS index with given dimension.
+        
+        Args:
+            dimension: Dimension of the embedding vectors
+        """
+        try:
+            import faiss
+            self.faiss = faiss
+            self.dimension = dimension
+            
+            # Create a flat L2 index (most basic FAISS index)
+            self.index = faiss.IndexFlatL2(dimension)
+            
+            # Store metadata and texts separately
+            self.texts = []
+            self.metadata = []
+            
+        except ImportError:
+            raise ImportError("FAISS library not installed. Install with: pip install faiss-cpu")
+    
+    def add(self, embeddings: List[List[float]], texts: List[str], metas: List[dict]):
+        """
+        Add embeddings, texts, and metadata to the index.
+        
+        Args:
+            embeddings: List of embedding vectors (as lists of floats)
+            texts: List of text strings corresponding to embeddings
+            metas: List of metadata dictionaries
+        """
+        # Convert embeddings to numpy array
+        embeddings_array = np.array(embeddings, dtype=np.float32)
+        
+        # Add to FAISS index
+        self.index.add(embeddings_array)
+        
+        # Store texts and metadata
+        self.texts.extend(texts)
+        self.metadata.extend(metas)
+    
+    def search(self, query_embedding: List[float], k: int = 1) -> List[dict]:
+        """
+        Search the index for similar vectors.
+        
+        Args:
+            query_embedding: Query vector as list of floats
+            k: Number of results to return
+            
+        Returns:
+            List of dictionaries containing text, metadata, and similarity scores
+        """
+        if self.index.ntotal == 0:
+            return []
+        
+        # Convert query to numpy array
+        query_array = np.array([query_embedding], dtype=np.float32)
+        
+        # Search FAISS index
+        distances, indices = self.index.search(query_array, k)
+        
+        # Prepare results
+        results = []
+        for i, (distance, idx) in enumerate(zip(distances[0], indices[0])):
+            if idx < len(self.texts):
+                result = {
+                    'text': self.texts[idx],
+                    'metadata': self.metadata[idx],
+                    'distance': float(distance),
+                    'similarity_score': float(1.0 / (1.0 + distance))  # Convert distance to similarity
+                }
+                results.append(result)
+        
+        return results
+
+
 # Example usage and testing
 if __name__ == "__main__":
     # Test vector store with sample data

@@ -209,3 +209,30 @@ if __name__ == "__main__":
     print(f"Query embedding shape: {query_embedding.shape}")
     
     print(f"Embedding dimension: {embedder.get_embedding_dimension()}")
+
+
+def get_embeddings(texts: List[str]) -> List[List[float]]:
+    """
+    Standalone function to get embeddings for a list of texts.
+    Returns embeddings as lists of floats (compatible with the requested API).
+    
+    Args:
+        texts: List of text strings to embed
+        
+    Returns:
+        List of embedding vectors as lists of floats
+    """
+    try:
+        # Use HuggingFace embedder as it's most reliable for local testing
+        embedder = create_embedder("huggingface")
+        
+        embeddings = []
+        for text in texts:
+            embedding = embedder.embed_single(text)
+            embeddings.append(embedding.tolist())  # Convert numpy array to list
+        
+        return embeddings
+        
+    except Exception as e:
+        logging.error(f"get_embeddings failed: {e}")
+        raise e

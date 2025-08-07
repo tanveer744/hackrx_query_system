@@ -3,9 +3,13 @@ HackRx Query System - Main FastAPI Application
 Simple schema-based implementation for testing
 """
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from app.schemas.request import QueryRequest
 from app.schemas.response import QueryResponse
+
+# Load environment variables
+load_dotenv()
 
 app = FastAPI(
     title="HackRx Query System",
