@@ -1,11 +1,18 @@
 """
 HackRx Query System - Main FastAPI Application
-Complete pipeline implementation using existing service functions
+Complete pipeline implementation with advanced features including:
+- Bearer token authentication
+- Cross-encoder reranking for improved accuracy
+- Enhanced document parsing with section detection
+- Comprehensive error handling and logging
 """
 
+import os
 import logging
+from typing import List, Dict, Any
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.schemas.request import QueryRequest
 from app.schemas.response import QueryResponse, AnswerItem
 from app.services.document_loader import DocumentLoader
@@ -21,17 +28,53 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Import reranker with fallback
+try:
+    from app.services.reranker import create_reranker, CROSS_ENCODER_AVAILABLE
+    RERANKER_AVAILABLE = CROSS_ENCODER_AVAILABLE
+    logger.info("Cross-encoder reranker loaded successfully")
+except ImportError:
+    RERANKER_AVAILABLE = False
+    logger.warning("Reranker not available - using standard retrieval")
+
+# Environment configuration
+HACKRX_API_KEY = os.getenv("HACKRX_API_KEY")
+ENABLE_RERANKING = os.getenv("ENABLE_RERANKING", "false").lower() == "true"
+RERANKING_CANDIDATES = int(os.getenv("RERANKING_CANDIDATES", "10"))
+RERANKING_TOP_K = int(os.getenv("RERANKING_TOP_K", "5"))
+
+# Security
+security = HTTPBearer()
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+    """Verify Bearer token for API authentication."""
+    if not HACKRX_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="API key not configured"
+        )
+    
+    if credentials.credentials != HACKRX_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API key"
+        )
+    return credentials.credentials
+
 app = FastAPI(
     title="HackRx Query System",
-    description="Semantic search and retrieval system for policy documents",
-    version="1.0.0"
+    description="Semantic search and retrieval system for policy documents with Cross-Encoder reranking",
+    version="2.0.0"
 )
 
 @app.post("/hackrx/run", response_model=QueryResponse)
-def run_query(request: QueryRequest):
+def run_query(request: QueryRequest, token: str = Depends(verify_token)):
     """
-    Main HackRx endpoint that processes documents and answers questions.
-    Uses existing service classes and functions with proper error handling.
+    Main HackRx endpoint with enhanced pipeline including:
+    - Bearer token authentication
+    - Advanced document parsing with section detection
+    - Cross-encoder reranking for improved accuracy
+    - Comprehensive error handling
     """
     try:
         logger.info(f"Processing request with {len(request.questions)} questions")
@@ -46,12 +89,27 @@ def run_query(request: QueryRequest):
         if not text_blocks:
             raise ValueError("No text blocks extracted from document")
 
-        # 2. Chunk text using DocumentChunker
-        logger.info("Step 2: Chunking text...")
+        # 2. Chunk text using DocumentChunker with enhanced metadata
+        logger.info("Step 2: Chunking text with metadata...")
         chunker = DocumentChunker()
         chunk_dicts = chunker.chunk_text(text_blocks)
-        chunks = [chunk_dict['chunk'] for chunk_dict in chunk_dicts if chunk_dict.get('chunk', '').strip()]
-        logger.info(f"Generated {len(chunks)} valid chunks")
+        
+        # Extract chunks with metadata preservation
+        chunks = []
+        chunk_metadata = []
+        for i, chunk_dict in enumerate(chunk_dicts):
+            chunk_text = chunk_dict.get('chunk', '').strip()
+            if chunk_text:  # Only include non-empty chunks
+                chunks.append(chunk_text)
+                metadata = {
+                    "index": i,
+                    "doc_id": chunk_dict.get('doc_id', 'unknown'),
+                    "page": chunk_dict.get('page', 1),
+                    "section": chunk_dict.get('section', 'Unknown Section')
+                }
+                chunk_metadata.append(metadata)
+        
+        logger.info(f"Generated {len(chunks)} valid chunks with metadata")
         
         if not chunks:
             raise ValueError("No valid chunks generated from document")
@@ -64,52 +122,102 @@ def run_query(request: QueryRequest):
         if not chunk_embeddings or not chunk_embeddings[0]:
             raise ValueError("Failed to generate embeddings")
 
-        # 4. Store in FAISS using existing FAISSIndex
-        logger.info("Step 4: Building FAISS index...")
+        # 4. Store in FAISS using existing FAISSIndex with metadata
+        logger.info("Step 4: Building FAISS index with metadata...")
         index = FAISSIndex(len(chunk_embeddings[0]))
-        metadata = [{"index": i} for i in range(len(chunks))]
-        index.add(chunk_embeddings, chunks, metadata)
-        logger.info("FAISS index built successfully")
+        index.add(chunk_embeddings, chunks, chunk_metadata)
+        logger.info("FAISS index built successfully with metadata")
 
-        # 5. Answer each question
-        logger.info("Step 5: Processing questions...")
+        # 5. Process each question with enhanced retrieval
+        logger.info("Step 5: Processing questions with enhanced retrieval...")
         answers = []
+        
         for i, q in enumerate(request.questions):
             if not q or not q.strip():
                 continue  # Skip empty questions
             
             logger.info(f"Processing question {i+1}: {q[:50]}...")
-            q_embedding = get_embeddings([q])[0]
-            search_results = index.search(q_embedding)
-            top_chunks = [c["text"] for c in search_results if "text" in c]
             
+            # Get query embedding
+            q_embedding = get_embeddings([q])[0]
+            
+            # Two-stage retrieval: Vector similarity + Cross-Encoder reranking
+            if ENABLE_RERANKING and RERANKER_AVAILABLE:
+                logger.info("Using two-stage retrieval with reranking")
+                
+                # Stage 1: Get more candidates for reranking
+                search_results = index.search(q_embedding, k=RERANKING_CANDIDATES)
+                candidate_chunks = [{"text": r["text"], "metadata": r.get("metadata", {}), "similarity_score": r.get("similarity_score", 0.0)} for r in search_results if "text" in r]
+                
+                if len(candidate_chunks) > 1:
+                    # Stage 2: Rerank with Cross-Encoder using the existing reranker service
+                    try:
+                        # Create reranker service
+                        reranker = create_reranker("cross_encoder")
+                        reranked_results = reranker.rerank(q, candidate_chunks)
+                        
+                        # Select top reranked chunks
+                        top_chunks = []
+                        for result in reranked_results[:RERANKING_TOP_K]:
+                            top_chunks.append(result["text"])
+                        
+                        logger.info(f"Reranked {len(candidate_chunks)} candidates to top {len(top_chunks)} chunks")
+                    except Exception as e:
+                        logger.warning(f"Reranking failed: {e}, using standard retrieval")
+                        top_chunks = [c["text"] for c in candidate_chunks[:5]]
+                else:
+                    top_chunks = [c["text"] for c in candidate_chunks]
+            else:
+                # Standard retrieval
+                logger.info("Using standard vector similarity retrieval")
+                search_results = index.search(q_embedding, k=5)
+                top_chunks = [c["text"] for c in search_results if "text" in c]
             logger.info(f"Found {len(top_chunks)} relevant chunks for question")
+            
+            # Generate answer using enhanced answer generator
             result = generate_answer(q, top_chunks)
             
-            # Ensure all required fields are present
+            # Create structured answer with all required fields
             answer_item = {
                 "answer": result.get("answer", "No answer generated"),
                 "source": result.get("source", "Unknown"),
                 "explanation": result.get("explanation", "No explanation provided"),
-                "confidence": result.get("confidence"),
-                "query_processed": result.get("query_processed"),
-                "context_chunks_count": result.get("context_chunks_count"),
-                "model_used": result.get("model_used")
+                "confidence": result.get("confidence", 0.7),
+                "query_processed": result.get("query_processed", q),
+                "context_chunks_count": result.get("context_chunks_count", len(top_chunks)),
+                "model_used": result.get("model_used", "Enhanced Pipeline")
             }
+            
+            # Add reranking information if applicable
+            if ENABLE_RERANKING and RERANKER_AVAILABLE:
+                answer_item["model_used"] += " + Cross-Encoder Reranking"
+            
             answers.append(AnswerItem(**answer_item))
 
-        logger.info(f"Successfully processed all questions, returning {len(answers)} answers")
-        return {"answers": answers}
-        
+        logger.info(f"Successfully processed {len(answers)} questions")
+        return QueryResponse(answers=answers)
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}")
-        # Return error as answer for debugging
+        # Return structured error response
         error_answer = AnswerItem(
             answer=f"Error processing request: {str(e)}",
             source="System Error", 
-            explanation="An error occurred during processing. Please check your input and try again."
+            explanation="An error occurred during processing. Please check your input and try again.",
+            confidence=0.0,
+            query_processed="Error",
+            context_chunks_count=0,
+            model_used="Error Handler"
         )
-        return {"answers": [error_answer]}
+        return QueryResponse(answers=[error_answer])
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "reranker_available": RERANKER_AVAILABLE,
+        "reranking_enabled": ENABLE_RERANKING
+    }
 
 if __name__ == "__main__":
     import uvicorn

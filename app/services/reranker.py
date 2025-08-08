@@ -236,6 +236,49 @@ def create_reranker(strategy: str = "cross_encoder", **kwargs) -> RerankerServic
     return RerankerService(strategy=strategy, **kwargs)
 
 
+# Global reranker instance (lazy loaded)
+_global_reranker = None
+
+def rerank_chunks(query: str, chunks: List[str], top_k: int = 5) -> List[int]:
+    """
+    Simple function to rerank chunks using cross-encoder.
+    This is the function that main.py imports.
+    
+    Args:
+        query: Search query
+        chunks: List of text chunks to rerank
+        top_k: Number of top chunks to return
+    
+    Returns:
+        List of indices of top chunks sorted by relevance
+    """
+    global _global_reranker
+    
+    if not CROSS_ENCODER_AVAILABLE:
+        logger.warning("Cross-encoder not available, returning original order")
+        return list(range(min(top_k, len(chunks))))
+    
+    try:
+        # Lazy load the reranker
+        if _global_reranker is None:
+            _global_reranker = CrossEncoderReranker()
+            logger.info("Loaded global cross-encoder reranker")
+        
+        # Get rerank scores
+        reranked_results = _global_reranker.rerank(query, chunks)
+        
+        # Return top_k indices
+        top_indices = [idx for idx, score in reranked_results[:top_k]]
+        
+        logger.info(f"Reranked {len(chunks)} chunks, returning top {len(top_indices)}")
+        return top_indices
+        
+    except Exception as e:
+        logger.error(f"Reranking failed: {e}")
+        # Fallback: return original order
+        return list(range(min(top_k, len(chunks))))
+
+
 # Example usage and testing
 if __name__ == "__main__":
     # Sample search results
