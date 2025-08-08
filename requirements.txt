@@ -18,7 +18,9 @@ numpy>=1.24.0
 torch>=2.0.0
 transformers>=4.30.0
 
-# Utilities
+# Text Processing & Utilities
+langchain>=0.1.0
+unidecode>=1.3.0
 python-dotenv>=1.0.0
 requests>=2.31.0
 typing-extensions>=4.5.0
