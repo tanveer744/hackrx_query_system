@@ -3,8 +3,9 @@ HackRx Query System - Main FastAPI Application
 Complete pipeline implementation using existing service functions
 """
 
+import logging
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from app.schemas.request import QueryRequest
 from app.schemas.response import QueryResponse, AnswerItem
 from app.services.document_loader import DocumentLoader
@@ -16,6 +17,10 @@ from app.services.answer_generator import generate_answer
 # Load environment variables
 load_dotenv()
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = FastAPI(
     title="HackRx Query System",
     description="Semantic search and retrieval system for policy documents",
@@ -26,47 +31,85 @@ app = FastAPI(
 def run_query(request: QueryRequest):
     """
     Main HackRx endpoint that processes documents and answers questions.
-    Uses existing service classes and functions.
+    Uses existing service classes and functions with proper error handling.
     """
-    # 1. Parse document using DocumentLoader
-    loader = DocumentLoader()
-    if request.documents.lower().endswith('.pdf'):
-        text_blocks = loader.extract_text_from_pdf(request.documents)
-    elif request.documents.lower().endswith('.docx'):
-        text_blocks = loader.extract_text_from_docx(request.documents)
-    else:
-        raise ValueError(f"Unsupported file type: {request.documents}")
-    
-    # Extract text strings from the blocks
-    full_text = [block['text'] for block in text_blocks if block['text'].strip()]
+    try:
+        logger.info(f"Processing request with {len(request.questions)} questions")
+        logger.info(f"Document source: {request.documents[:100]}...")
+        
+        # 1. Parse document using DocumentLoader (supports URLs and local files)
+        logger.info("Step 1: Loading document...")
+        loader = DocumentLoader()
+        text_blocks = loader.parse_document(request.documents)
+        logger.info(f"Extracted {len(text_blocks)} text blocks")
+        
+        if not text_blocks:
+            raise ValueError("No text blocks extracted from document")
 
-    # 2. Chunk text using DocumentChunker
-    chunker = DocumentChunker()
-    # Convert text to the format expected by chunker
-    text_blocks_for_chunker = [
-        {"doc_id": f"doc_{i}", "page": i+1, "text": text}
-        for i, text in enumerate(full_text)
-    ]
-    chunk_dicts = chunker.chunk_text(text_blocks_for_chunker)
-    chunks = [chunk_dict['chunk'] for chunk_dict in chunk_dicts if chunk_dict['chunk'].strip()]
+        # 2. Chunk text using DocumentChunker
+        logger.info("Step 2: Chunking text...")
+        chunker = DocumentChunker()
+        chunk_dicts = chunker.chunk_text(text_blocks)
+        chunks = [chunk_dict['chunk'] for chunk_dict in chunk_dicts if chunk_dict.get('chunk', '').strip()]
+        logger.info(f"Generated {len(chunks)} valid chunks")
+        
+        if not chunks:
+            raise ValueError("No valid chunks generated from document")
 
-    # 3. Embed chunks using existing get_embeddings function
-    chunk_embeddings = get_embeddings(chunks)
+        # 3. Embed chunks using existing get_embeddings function
+        logger.info("Step 3: Generating embeddings...")
+        chunk_embeddings = get_embeddings(chunks)
+        logger.info(f"Generated embeddings with dimension {len(chunk_embeddings[0])}")
+        
+        if not chunk_embeddings or not chunk_embeddings[0]:
+            raise ValueError("Failed to generate embeddings")
 
-    # 4. Store in FAISS using existing FAISSIndex
-    index = FAISSIndex(len(chunk_embeddings[0]))
-    metadata = [{"index": i} for i in range(len(chunks))]
-    index.add(chunk_embeddings, chunks, metadata)
+        # 4. Store in FAISS using existing FAISSIndex
+        logger.info("Step 4: Building FAISS index...")
+        index = FAISSIndex(len(chunk_embeddings[0]))
+        metadata = [{"index": i} for i in range(len(chunks))]
+        index.add(chunk_embeddings, chunks, metadata)
+        logger.info("FAISS index built successfully")
 
-    # 5. Answer each question
-    answers = []
-    for q in request.questions:
-        q_embedding = get_embeddings([q])[0]
-        top_chunks = [c["text"] for c in index.search(q_embedding)]
-        result = generate_answer(q, top_chunks)  # Correct parameter order
-        answers.append(AnswerItem(**result))
+        # 5. Answer each question
+        logger.info("Step 5: Processing questions...")
+        answers = []
+        for i, q in enumerate(request.questions):
+            if not q or not q.strip():
+                continue  # Skip empty questions
+            
+            logger.info(f"Processing question {i+1}: {q[:50]}...")
+            q_embedding = get_embeddings([q])[0]
+            search_results = index.search(q_embedding)
+            top_chunks = [c["text"] for c in search_results if "text" in c]
+            
+            logger.info(f"Found {len(top_chunks)} relevant chunks for question")
+            result = generate_answer(q, top_chunks)
+            
+            # Ensure all required fields are present
+            answer_item = {
+                "answer": result.get("answer", "No answer generated"),
+                "source": result.get("source", "Unknown"),
+                "explanation": result.get("explanation", "No explanation provided"),
+                "confidence": result.get("confidence"),
+                "query_processed": result.get("query_processed"),
+                "context_chunks_count": result.get("context_chunks_count"),
+                "model_used": result.get("model_used")
+            }
+            answers.append(AnswerItem(**answer_item))
 
-    return {"answers": answers}
+        logger.info(f"Successfully processed all questions, returning {len(answers)} answers")
+        return {"answers": answers}
+        
+    except Exception as e:
+        logger.error(f"Error processing request: {str(e)}")
+        # Return error as answer for debugging
+        error_answer = AnswerItem(
+            answer=f"Error processing request: {str(e)}",
+            source="System Error", 
+            explanation="An error occurred during processing. Please check your input and try again."
+        )
+        return {"answers": [error_answer]}
 
 if __name__ == "__main__":
     import uvicorn
