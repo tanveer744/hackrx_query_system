@@ -38,7 +38,7 @@ def validate_query(query: str) -> bool:
     """
     return bool(query and len(query.strip()) >= 3)
 
-def format_prompt(query: str, context_chunks: List[str], max_context_length: int = 1000) -> str:
+def format_prompt(query: str, context_chunks: List[str], max_context_length: int = 2000) -> str:
     """
     Formats the prompt by combining context chunks and the question with enhanced JSON instructions.
 
@@ -53,9 +53,16 @@ def format_prompt(query: str, context_chunks: List[str], max_context_length: int
     combined_context = "\n---\n".join(context_chunks)[:max_context_length] if context_chunks else "No context provided"
     prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id>
 
-You are an expert insurance policy analyst. Your task is to analyze the provided context and answer questions with PERFECT JSON formatting.
+You are an expert insurance policy analyst. Your task is to analyze the provided policy document context and answer questions with precision and PERFECT JSON formatting.
 
-CRITICAL INSTRUCTIONS:
+ANALYSIS INSTRUCTIONS:
+- Focus on specific coverage, exclusions, conditions, and procedures mentioned
+- Look for explicit mentions of the queried condition/treatment
+- Reference specific policy clauses, sections, or numbered items
+- Be definitive when the policy clearly states something
+- If not explicitly mentioned, check related categories (surgical procedures, medical treatments, etc.)
+
+CRITICAL JSON FORMAT REQUIREMENTS:
 1. You MUST respond with ONLY valid JSON - no additional text before or after
 2. The JSON must have exactly these 3 fields: "answer", "source", "explanation"
 3. Each field value must be a string (not null, not empty)
@@ -64,15 +71,15 @@ CRITICAL INSTRUCTIONS:
 
 JSON SCHEMA (follow exactly):
 {{
-  "answer": "Your clear, direct answer to the question",
-  "source": "Specific clause/section reference that supports your answer",
-  "explanation": "Detailed reasoning based on the provided context"
+  "answer": "Clear, direct answer: Yes/No/Partially covered, with key details",
+  "source": "Specific clause/section numbers and titles that support your answer",
+  "explanation": "Detailed reasoning referencing exact policy language and conditions"
 }}
 
-CONTEXT:
+POLICY CONTEXT:
 {combined_context}
 
-QUESTION:
+COVERAGE QUESTION:
 {query}
 
 IMPORTANT: Your response must start with {{ and end with }} - nothing else.

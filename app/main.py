@@ -40,8 +40,8 @@ except ImportError:
 # Environment configuration
 HACKRX_API_KEY = os.getenv("HACKRX_API_KEY")
 ENABLE_RERANKING = os.getenv("ENABLE_RERANKING", "false").lower() == "true"
-RERANKING_CANDIDATES = int(os.getenv("RERANKING_CANDIDATES", "10"))
-RERANKING_TOP_K = int(os.getenv("RERANKING_TOP_K", "5"))
+RERANKING_CANDIDATES = int(os.getenv("RERANKING_CANDIDATES", "15"))  # Increased for better coverage
+RERANKING_TOP_K = int(os.getenv("RERANKING_TOP_K", "8"))  # Increased for more context
 
 # Security
 security = HTTPBearer()
@@ -140,6 +140,19 @@ def run_query(request: QueryRequest, token: str = Depends(verify_token)):
             
             # Get query embedding
             q_embedding = get_embeddings([q])[0]
+            
+            # Enhanced query for better medical/surgical coverage detection
+            enhanced_queries = [q]
+            if any(term in q.lower() for term in ['surgery', 'surgical', 'operation']):
+                enhanced_queries.append(f"surgical procedures {q}")
+                enhanced_queries.append(f"medical treatment {q}")
+            
+            # Get embeddings for all enhanced queries and average them
+            if len(enhanced_queries) > 1:
+                all_embeddings = get_embeddings(enhanced_queries)
+                # Convert to numpy array and average
+                import numpy as np
+                q_embedding = np.mean(all_embeddings, axis=0)
             
             # Two-stage retrieval: Vector similarity + Cross-Encoder reranking
             if ENABLE_RERANKING and RERANKER_AVAILABLE:
