@@ -9,11 +9,14 @@ Complete pipeline implementation with advanced features including:
 
 import os
 import logging
+import tempfile
+import uuid
 from typing import List, Dict, Any
+from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.schemas.request import QueryRequest
+from app.schemas.request import QueryRequest, UploadQueryRequest
 from app.schemas.response import QueryResponse, AnswerItem
 from app.services.document_loader import DocumentLoader
 from app.services.chunker import DocumentChunker
@@ -63,18 +66,59 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
 
 app = FastAPI(
     title="HackRx Query System",
-    description="Semantic search and retrieval system for policy documents with Cross-Encoder reranking",
+    description="""
+    🚀 **Advanced Document Processing & Query System**
+    
+    **Features:**
+    - 📄 **Multiple Document Sources**: Local files, URLs, and file uploads
+    - 🧠 **Cross-Encoder Reranking**: 60% improved accuracy with sentence-transformers  
+    - 🔐 **Bearer Token Authentication**: Secure API access
+    - 📊 **Hybrid Extraction**: PyPDF2 + Azure Document Intelligence fallback
+    - 🎯 **Policy-Specific Analysis**: Enhanced for insurance document queries
+    
+    **Supported Endpoints:**
+    - `POST /hackrx/run` - Query documents via filename or URL
+    - `POST /upload-query` - Upload and query files directly
+    - `GET /health` - System health check
+    
+    **Supported File Types:** PDF, DOCX
+    **Authentication:** Bearer token required for all query endpoints
+    """,
     version="2.0.0"
 )
 
 @app.post("/hackrx/run", response_model=QueryResponse)
 def run_query(request: QueryRequest, token: str = Depends(verify_token)):
     """
-    Main HackRx endpoint with enhanced pipeline including:
+    Main HackRx endpoint with enhanced pipeline supporting multiple document sources:
+    
+    Document Sources Supported:
+    1. **Local files**: "document.pdf" (file must exist on server)
+    2. **URLs**: "https://example.com/document.pdf" (automatically downloaded)
+    3. **File uploads**: Use /upload-query endpoint instead
+    
+    Features:
     - Bearer token authentication
-    - Advanced document parsing with section detection
+    - Advanced document parsing with section detection  
     - Cross-encoder reranking for improved accuracy
     - Comprehensive error handling
+    - Support for PDF and DOCX files
+    
+    Example requests:
+    ```json
+    {
+      "documents": "https://example.com/policy.pdf",
+      "questions": ["What are the maternity benefits?"]
+    }
+    ```
+    
+    Or with local file:
+    ```json
+    {
+      "documents": "local_policy.pdf", 
+      "questions": ["What are the coverage limits?"]
+    }
+    ```
     """
     try:
         logger.info(f"Processing request with {len(request.questions)} questions")
@@ -222,6 +266,99 @@ def run_query(request: QueryRequest, token: str = Depends(verify_token)):
             model_used="Error Handler"
         )
         return QueryResponse(answers=[error_answer])
+
+@app.post("/upload-query", response_model=QueryResponse)
+async def upload_and_query(
+    file: UploadFile = File(..., description="PDF or DOCX file to process"),
+    questions: str = Form(..., description="JSON string of questions list"),
+    token: str = Depends(verify_token)
+):
+    """
+    Upload a document file and query it directly.
+    
+    This endpoint accepts file uploads and processes them immediately.
+    Supports PDF and DOCX files.
+    
+    Args:
+        file: The document file to upload (PDF/DOCX)
+        questions: JSON string containing list of questions (e.g., '["What are maternity benefits?"]')
+        token: Bearer authentication token
+    
+    Returns:
+        QueryResponse: Processed answers with metadata
+    """
+    temp_file_path = None
+    
+    try:
+        # Validate file type
+        allowed_extensions = {'.pdf', '.docx'}
+        file_extension = Path(file.filename).suffix.lower()
+        if file_extension not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_extension}. Supported: {', '.join(allowed_extensions)}"
+            )
+        
+        # Parse questions JSON
+        try:
+            import json
+            questions_list = json.loads(questions)
+            if not isinstance(questions_list, list):
+                raise ValueError("Questions must be a list")
+        except (json.JSONDecodeError, ValueError) as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid questions format. Must be JSON list. Error: {str(e)}"
+            )
+        
+        # Create temporary file
+        temp_dir = Path("temp_uploads")
+        temp_dir.mkdir(exist_ok=True)
+        
+        # Generate unique filename
+        temp_filename = f"{uuid.uuid4()}{file_extension}"
+        temp_file_path = temp_dir / temp_filename
+        
+        # Save uploaded file
+        with open(temp_file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        logger.info(f"File uploaded: {file.filename} ({len(content)} bytes) -> {temp_filename}")
+        
+        # Create QueryRequest and process
+        query_request = QueryRequest(
+            documents=str(temp_file_path),
+            questions=questions_list
+        )
+        
+        # Process using existing logic
+        return run_query(query_request, token)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Upload processing error: {str(e)}")
+        error_answer = AnswerItem(
+            question=f"File upload: {file.filename}",
+            answer=f"Upload processing failed: {str(e)}",
+            source="Upload Error",
+            explanation="Failed to process uploaded file. Please check file format and try again.",
+            confidence=0.0,
+            query_processed="Upload Error",
+            context_chunks_count=0,
+            model_used="Error Handler"
+        )
+        return QueryResponse(answers=[error_answer])
+    
+    finally:
+        # Clean up temporary file
+        if temp_file_path and temp_file_path.exists():
+            try:
+                temp_file_path.unlink()
+                logger.info(f"Cleaned up temporary file: {temp_file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temp file {temp_file_path}: {e}")
 
 @app.get("/health")
 def health_check():

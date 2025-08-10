@@ -54,3 +54,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Temporary uploads
+temp_uploads/
+*.pdf
+*.docx
+temp_*
