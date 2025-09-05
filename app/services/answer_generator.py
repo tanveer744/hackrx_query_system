@@ -1,14 +1,3 @@
-"""
-Answer Generator Module - Member 4 (Prompt Engineer)
-====================================================
-
-This module uses the Gemini API to generate structured answers from context chunks
-via HTTP API calls, with enhanced JSON reliability and advanced fallback mechanisms.
-
-Author: Nehal (Member 4 - Prompt Engineer)
-Day: Updated for Gemini API integration with Day 4 JSON enhancements
-"""
-
 import json
 import logging
 import os
