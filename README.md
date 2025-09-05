@@ -66,7 +66,7 @@ hackrx_query_system/
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/Mohammedmaaz1786/hackrx_query_system.git
+   git clone https://github.com/tanveer744/hackrx_query_system.git
    cd hackrx_query_system
    ```
 
